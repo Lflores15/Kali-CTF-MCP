@@ -213,6 +213,50 @@ class InputValidator:
         return hostname
 
     @classmethod
+    def validate_scan_target(cls, target: str) -> str:
+        """
+        Validate a scan target: single hostname/IP, CIDR range, or IP range.
+
+        Accepts:
+            - Hostname:  scanme.nmap.org
+            - Single IP: 10.10.10.10
+            - CIDR:      10.10.10.0/24
+            - IP range:  10.10.10.1-50
+
+        Raises:
+            SecurityError: If target is invalid or contains dangerous characters
+        """
+        if not target or not isinstance(target, str):
+            raise SecurityError("Scan target cannot be empty")
+
+        target = target.strip()
+
+        # Block shell metacharacters regardless of format
+        if any(c in cls.SHELL_METACHARACTERS for c in target):
+            raise SecurityError(f"Invalid characters in scan target: {target}")
+
+        # CIDR notation: e.g. 10.10.10.0/24
+        cidr_match = re.match(r'^([\d.]+)/(\d{1,2})$', target)
+        if cidr_match:
+            cls.validate_hostname(cidr_match.group(1))
+            prefix = int(cidr_match.group(2))
+            if not 0 <= prefix <= 32:
+                raise SecurityError(f"Invalid CIDR prefix length: {prefix}")
+            return target
+
+        # IP range notation: e.g. 10.10.10.1-50
+        range_match = re.match(r'^([\d.]+)-(\d+)$', target)
+        if range_match:
+            cls.validate_hostname(range_match.group(1))
+            end = int(range_match.group(2))
+            if not 0 <= end <= 255:
+                raise SecurityError(f"Invalid IP range end: {end}")
+            return target
+
+        # Single hostname or IP
+        return cls.validate_hostname(target)
+
+    @classmethod
     def validate_port(cls, port) -> int:
         """
         Validate port number.
