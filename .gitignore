@@ -1,10 +1,22 @@
 Kali/
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+dist/
+build/
+.DS_Store
+
+# Environment
+.env
 
 # Claude Code
 .claude/
 .agents/
 skills-lock.json
+
+# Server manager runtime files
+.pids/
+.logs/

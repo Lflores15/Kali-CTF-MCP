@@ -37,10 +37,12 @@ def _find_vol_binary() -> str:
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return str(candidate)
 
-    # 3. Known project venv location
-    project_venv = Path.home() / "Documents" / "Code" / "Kali-venv" / "Kali-venv" / "bin" / "vol"
-    if project_venv.is_file() and os.access(project_venv, os.X_OK):
-        return str(project_venv)
+    # 3. VENV_PYTHON env var — derive vol from the same venv's bin/
+    venv_python = os.environ.get("VENV_PYTHON", "")
+    if venv_python:
+        candidate = Path(venv_python).parent / "vol"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
 
     # 4. Common home-directory venv locations
     home = Path.home()
