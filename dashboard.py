@@ -81,6 +81,7 @@ TOOL_NAMES: dict[str, list[str]] = {
         "web_websocket_test","web_oauth_attacks","web_cors_exploit","web_cache_poison",
         "web_pdf_ssrf","web_upload_bypass","web_race_condition","web_url_decode_recursive",
         "web_http_header_analyze","web_postgres_query","web_mysql_query",
+        "sqlmap_scan","sqlmap_dbs","sqlmap_tables","sqlmap_dump","sqlmap_waf","sqlmap_shell",
         "misc_hex_encode","misc_hex_decode","misc_url_encode","misc_url_decode",
         "misc_html_encode","misc_html_decode","misc_binary_convert","misc_find_flag",
         "misc_strings_extract","misc_reverse_string","misc_reverse_words","misc_char_swap",
@@ -150,6 +151,42 @@ SERVERS = [
     {"name": "reverse",   "port": 8004, "tools": len(TOOL_NAMES["reverse"]),   "desc": "Reverse + Misc"},
     {"name": "forensics", "port": 8005, "tools": len(TOOL_NAMES["forensics"]), "desc": "Forensics + Mem + PCAP"},
 ]
+
+# External tool dependencies per server category
+EXTERNAL_TOOLS: dict[str, list[tuple[str, str]]] = {
+    "crypto":    [],  # pure Python
+    "web":       [("sqlmap",   "sqlmap")],
+    "pwn":       [("pwntools", "pwn"), ("angr", "angr")],
+    "reverse":   [],  # capstone/keystone are Python libs
+    "forensics": [
+        ("volatility3", "vol"),
+        ("tshark",      "tshark"),
+        ("binwalk",     "binwalk"),
+        ("steghide",    "steghide"),
+        ("john",        "john"),
+        ("hashcat",     "hashcat"),
+    ],
+    "full": [
+        ("sqlmap",      "sqlmap"),
+        ("volatility3", "vol"),
+        ("tshark",      "tshark"),
+        ("nmap",        "nmap"),
+        ("hashcat",     "hashcat"),
+        ("john",        "john"),
+        ("binwalk",     "binwalk"),
+        ("steghide",    "steghide"),
+        ("pwntools",    "pwn"),
+        ("angr",        "angr"),
+    ],
+}
+
+def check_external_tools(category: str) -> list[tuple[str, bool]]:
+    """Return [(display_name, is_installed), ...] for a category."""
+    import shutil
+    return [
+        (name, shutil.which(binary) is not None)
+        for name, binary in EXTERNAL_TOOLS.get(category, [])
+    ]
 
 # ---------------------------------------------------------------------------
 # Claude stats
@@ -441,6 +478,56 @@ def draw_servers(win, x: int, y: int, panel_w: int, panel_h: int, selected: int)
         row += 1
 
 # ---------------------------------------------------------------------------
+# Panel: Tools (below server table, inside server panel)
+# ---------------------------------------------------------------------------
+
+def draw_tools(win, x: int, y: int, panel_w: int, panel_h: int,
+               selected: int, tool_scroll: int):
+    """Draw external tool dependencies for the selected server."""
+    border_attr = curses.color_pair(C_BORDER)
+    srv         = SERVERS[selected]
+    name        = srv["name"]
+    ext_tools   = check_external_tools(name)
+
+    # Section divider + header
+    draw_hline(win, y, x, x + panel_w, border_attr)
+    addstr_clipped(win, y + 1, x + 1, " EXTERNAL TOOLS",
+                   curses.color_pair(C_LABEL) | curses.A_BOLD)
+    draw_hline(win, y + 2, x, x + panel_w, border_attr)
+
+    if panel_h < 4:
+        return
+
+    if not ext_tools:
+        addstr_clipped(win, y + 3, x + 2, "No external tools required",
+                       curses.color_pair(C_DIM))
+        return
+
+    visible = panel_h - 4
+    display = ext_tools[tool_scroll: tool_scroll + visible]
+
+    for i, (tool_name, installed) in enumerate(display):
+        row = y + 3 + i
+        if row >= y + panel_h:
+            break
+        badge      = "✔ " if installed else "✘ "
+        badge_attr = (curses.color_pair(C_RUNNING) | curses.A_BOLD) if installed \
+                     else (curses.color_pair(C_STOPPED) | curses.A_BOLD)
+        name_attr  = curses.color_pair(C_STAT) | curses.A_BOLD if installed \
+                     else curses.color_pair(C_DIM)
+        status_lbl = "installed" if installed else "not found"
+        addstr_clipped(win, row, x + 2,  badge,      badge_attr)
+        addstr_clipped(win, row, x + 4,  f"{tool_name:<14}", name_attr)
+        addstr_clipped(win, row, x + 18, status_lbl, curses.color_pair(C_DIM))
+
+    # Scroll indicator if needed
+    if len(ext_tools) > visible:
+        pct = int(tool_scroll / max(1, len(ext_tools) - visible) * 100)
+        addstr_clipped(win, y + panel_h - 1, x + 1,
+                       f" ↕ {tool_scroll+1}-{min(tool_scroll+visible, len(ext_tools))}/{len(ext_tools)} ({pct}%)",
+                       curses.color_pair(C_DIM))
+
+# ---------------------------------------------------------------------------
 # Panel: Skills
 # ---------------------------------------------------------------------------
 
@@ -565,7 +652,8 @@ def draw_statusbar(win, h: int, w: int, message: str, tick: int):
 HELP_ENTRIES = [
     ("Navigation", [
         ("↑ / ↓",        "Select server"),
-        ("PgUp / PgDn",  "Scroll skill list"),
+        ("PgUp / PgDn",  "Scroll skill list (middle panel)"),
+        ("[ / ]",        "Scroll tool list (left panel)"),
     ]),
     ("Server Control", [
         ("Space / Enter", "Start or stop selected server"),
@@ -656,7 +744,7 @@ def show_logs(win, name: str):
 # ---------------------------------------------------------------------------
 
 def draw(win, selected: int, message: str, tick: int,
-         skill_scroll: int, claude_info: dict):
+         skill_scroll: int, tool_scroll: int, claude_info: dict):
     h, w = win.getmaxyx()
     win.erase()
     win.attron(curses.color_pair(C_BORDER))
@@ -670,21 +758,26 @@ def draw(win, selected: int, message: str, tick: int,
     content_h = h - 4   # rows available between title border and status bar
     content_y = 1
 
+    # Server table height: header(1) + underline(1) + rows(6) + 1 padding = 9
+    srv_table_h = 9
+
     # ── Layout: 3 panels when wide, 1 panel when narrow ──────────────────
     if w >= 120:
-        srv_w   = 56
+        srv_w    = 56
         claude_w = 28
-        skill_w  = w - srv_w - claude_w - 2   # remainder
+        skill_w  = w - srv_w - claude_w - 2
 
-        # Server panel (left)
+        # Left panel: server table (top) + tools panel (bottom)
         draw_vline(win, srv_w, content_y, content_y + content_h, curses.color_pair(C_BORDER))
-        draw_servers(win, 1, content_y, srv_w, content_h, selected)
+        draw_servers(win, 1, content_y, srv_w, srv_table_h, selected)
+        tools_h = content_h - srv_table_h
+        draw_tools(win, 1, content_y + srv_table_h, srv_w, tools_h, selected, tool_scroll)
 
-        # Skills panel (middle)
+        # Middle: skills panel
         draw_vline(win, srv_w + skill_w, content_y, content_y + content_h, curses.color_pair(C_BORDER))
         draw_skills(win, srv_w, content_y, skill_w, content_h, selected, skill_scroll)
 
-        # Claude panel (right)
+        # Right: Claude info
         draw_claude(win, srv_w + skill_w, content_y, claude_w, content_h, claude_info)
 
     elif w >= 80:
@@ -693,13 +786,19 @@ def draw(win, selected: int, message: str, tick: int,
         half_h  = content_h // 2
 
         draw_vline(win, srv_w, content_y, content_y + content_h, curses.color_pair(C_BORDER))
-        draw_servers(win, 1, content_y, srv_w, content_h, selected)
+        # Left: server table + tools
+        draw_servers(win, 1, content_y, srv_w, srv_table_h, selected)
+        tools_h = content_h - srv_table_h
+        draw_tools(win, 1, content_y + srv_table_h, srv_w, tools_h, selected, tool_scroll)
+        # Right: skills top, Claude bottom
         draw_skills(win, srv_w, content_y, right_w, half_h, selected, skill_scroll)
         draw_hline(win, content_y + half_h, srv_w, w - 1, curses.color_pair(C_BORDER))
         draw_claude(win, srv_w, content_y + half_h, right_w, content_h - half_h, claude_info)
 
     else:
-        draw_servers(win, 1, content_y, w - 2, content_h, selected)
+        draw_servers(win, 1, content_y, w - 2, srv_table_h, selected)
+        tools_h = content_h - srv_table_h
+        draw_tools(win, 1, content_y + srv_table_h, w - 2, tools_h, selected, tool_scroll)
 
     draw_statusbar(win, h, w, message, tick)
     win.refresh()
@@ -719,6 +818,7 @@ def main(stdscr):
     msg_ttl      = 0
     tick         = 0
     skill_scroll = 0
+    tool_scroll  = 0
     claude_info  = load_claude_info()
     info_refresh = 0   # refresh claude info every 30 ticks (~15s)
 
@@ -727,7 +827,7 @@ def main(stdscr):
             claude_info  = load_claude_info()
             info_refresh = 30
 
-        draw(stdscr, selected, message if msg_ttl > 0 else "", tick, skill_scroll, claude_info)
+        draw(stdscr, selected, message if msg_ttl > 0 else "", tick, skill_scroll, tool_scroll, claude_info)
 
         key = stdscr.getch()
         tick        += 1
@@ -741,17 +841,26 @@ def main(stdscr):
         elif key == curses.KEY_UP:
             selected     = (selected - 1) % len(SERVERS)
             skill_scroll = 0
+            tool_scroll  = 0
 
         elif key == curses.KEY_DOWN:
             selected     = (selected + 1) % len(SERVERS)
             skill_scroll = 0
+            tool_scroll  = 0
 
-        elif key == curses.KEY_NPAGE:   # Page Down → scroll skills
+        elif key == curses.KEY_NPAGE:   # Page Down → scroll skills (middle panel)
             tools = TOOL_NAMES.get(SERVERS[selected]["name"], [])
             skill_scroll = min(skill_scroll + 10, max(0, len(tools) - 1))
 
-        elif key == curses.KEY_PPAGE:   # Page Up → scroll skills
+        elif key == curses.KEY_PPAGE:   # Page Up → scroll skills (middle panel)
             skill_scroll = max(0, skill_scroll - 10)
+
+        elif key == curses.KEY_DOWN + 1000 or key == ord("]"):  # ] → scroll tools down
+            tools = TOOL_NAMES.get(SERVERS[selected]["name"], [])
+            tool_scroll = min(tool_scroll + 10, max(0, len(tools) - 1))
+
+        elif key == ord("["):           # [ → scroll tools up
+            tool_scroll = max(0, tool_scroll - 10)
 
         elif key in (ord("t"), ord("T")):
             global CURRENT_TRANSPORT
@@ -802,6 +911,7 @@ def main(stdscr):
         elif key == curses.KEY_RESIZE:
             stdscr.erase()
             skill_scroll = 0
+            tool_scroll  = 0
 
 
 def run():

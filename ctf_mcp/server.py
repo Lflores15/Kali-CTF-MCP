@@ -18,6 +18,7 @@ from .tools.hashcat import CrackingTools
 from .tools.network import NetworkTools
 from .tools.memory import MemoryTools
 from .tools.pcap import PcapTools
+from .tools.sqlmap import SqlmapTools
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +30,7 @@ def main():
     modules = [
         ("crypto",    CryptoTools()),
         ("web",       WebTools()),
+        ("sqlmap",    SqlmapTools()),
         ("pwn",       PwnTools()),
         ("reverse",   ReverseTools()),
         ("forensics", ForensicsTools()),

@@ -46,7 +46,8 @@ def build_app(category: str):
 
     elif category == "web":
         from ctf_mcp.tools.web import WebTools
-        modules = [("web", WebTools()), ("misc", misc)]
+        from ctf_mcp.tools.sqlmap import SqlmapTools
+        modules = [("web", WebTools()), ("sqlmap", SqlmapTools()), ("misc", misc)]
 
     elif category == "pwn":
         from ctf_mcp.tools.pwn import PwnTools
@@ -71,6 +72,7 @@ def build_app(category: str):
     else:  # full
         from ctf_mcp.tools.crypto import CryptoTools
         from ctf_mcp.tools.web import WebTools
+        from ctf_mcp.tools.sqlmap import SqlmapTools
         from ctf_mcp.tools.pwn import PwnTools
         from ctf_mcp.tools.reverse import ReverseTools
         from ctf_mcp.tools.forensics import ForensicsTools
@@ -81,6 +83,7 @@ def build_app(category: str):
         modules = [
             ("crypto",    CryptoTools()),
             ("web",       WebTools()),
+            ("sqlmap",    SqlmapTools()),
             ("pwn",       PwnTools()),
             ("reverse",   ReverseTools()),
             ("forensics", ForensicsTools()),
