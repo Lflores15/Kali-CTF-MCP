@@ -9,6 +9,9 @@ dist/
 build/
 .DS_Store
 
+# Environment
+.env
+
 # Claude Code
 .claude/
 .agents/

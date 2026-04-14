@@ -8,8 +8,18 @@
 
 set -euo pipefail
 
-VENV_PYTHON="/Users/louisflores/Documents/Code/Kali-venv/Kali-venv/bin/python"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load .env if present (allows overriding VENV_PYTHON and other vars)
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    set -o allexport
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/.env"
+    set +o allexport
+fi
+
+# Default to system python3 if VENV_PYTHON not set
+VENV_PYTHON="${VENV_PYTHON:-python3}"
 PID_DIR="$SCRIPT_DIR/.pids"
 LOG_DIR="$SCRIPT_DIR/.logs"
 

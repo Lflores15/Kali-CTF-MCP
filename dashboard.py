@@ -21,7 +21,15 @@ from pathlib import Path
 SCRIPT_DIR  = Path(__file__).parent
 PID_DIR     = SCRIPT_DIR / ".pids"
 LOG_DIR     = SCRIPT_DIR / ".logs"
-VENV_PYTHON = "/Users/louisflores/Documents/Code/Kali-venv/Kali-venv/bin/python"
+_env_file = SCRIPT_DIR / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip())
+
+VENV_PYTHON = os.environ.get("VENV_PYTHON", "python3")
 SSE_SCRIPT  = SCRIPT_DIR / "sse_server.py"
 CLAUDE_DIR  = Path.home() / ".claude"
 
