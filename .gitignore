@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Claude Code
+.claude/
+.agents/
+skills-lock.json
