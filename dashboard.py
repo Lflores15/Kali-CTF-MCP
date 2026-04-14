@@ -33,6 +33,10 @@ VENV_PYTHON = os.environ.get("VENV_PYTHON", "python3")
 SSE_SCRIPT  = SCRIPT_DIR / "sse_server.py"
 CLAUDE_DIR  = Path.home() / ".claude"
 
+TRANSPORTS        = ["sse", "streamable"]
+TRANSPORT_PATHS   = {"sse": "/sse", "streamable": "/mcp"}
+CURRENT_TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")  # mutable via 'T' key in TUI
+
 PID_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -260,7 +264,8 @@ def start_server(name: str, port: int) -> bool:
         return True
     with open(log_file(name), "a") as lf:
         proc = subprocess.Popen(
-            [VENV_PYTHON, str(SSE_SCRIPT), name, str(port)],
+            [VENV_PYTHON, str(SSE_SCRIPT), name, str(port),
+             "--transport", CURRENT_TRANSPORT],
             stdout=lf, stderr=lf,
             start_new_session=True,
         )
@@ -330,7 +335,7 @@ def init_colors():
 def addstr_clipped(win, y: int, x: int, text: str, attr: int = 0, max_w: int = 0):
     h, w = win.getmaxyx()
     max_w = max_w or (w - x - 1)
-    if y >= h - 1 or x >= w - 1 or max_w <= 0:
+    if y >= h or x >= w - 1 or max_w <= 0:
         return
     text = text[:max_w]
     try:
@@ -540,25 +545,88 @@ def draw_statusbar(win, h: int, w: int, message: str, tick: int):
 
     draw_hline(win, h - 4, 1, w - 1, curses.color_pair(C_BORDER))
 
-    stat = f"  {spinner}  Servers: {running_count}/{len(SERVERS)}   Active tools: {active_tools}"
+    stat = f"  {spinner}  Servers: {running_count}/{len(SERVERS)}   Active tools: {active_tools}   Transport: {CURRENT_TRANSPORT.upper()}"
     addstr_clipped(win, h - 3, 2, stat, curses.color_pair(C_STAT) | curses.A_BOLD, w - 4)
 
     if message:
         msg_x = 2 + len(stat) + 4
         addstr_clipped(win, h - 3, msg_x, f"│ {message}", curses.color_pair(C_KEY) | curses.A_BOLD, w - msg_x - 2)
 
+    # Right side of stat line: [?] Help
+    addstr_clipped(win, h - 3, w - 10, "[?]", curses.color_pair(C_KEY) | curses.A_BOLD)
+    addstr_clipped(win, h - 3, w - 7,  " Help", curses.color_pair(C_DIM))
+
     draw_hline(win, h - 2, 1, w - 1, curses.color_pair(C_BORDER))
 
-    keys = [("↑↓","Servers"),("PgUp/Dn","Scroll skills"),
-            ("Space","Toggle"),("A","Start All"),("X","Stop All"),("L","Logs"),("Q","Quit")]
-    x = 2
-    for key, lbl in keys:
-        chunk = f"[{key}] {lbl}  "
-        if x + len(chunk) >= w - 2:
-            break
-        addstr_clipped(win, h - 1, x, f"[{key}]", curses.color_pair(C_KEY) | curses.A_BOLD)
-        addstr_clipped(win, h - 1, x + len(key) + 2, f" {lbl}  ", curses.color_pair(C_DIM))
-        x += len(chunk)
+# ---------------------------------------------------------------------------
+# Help overlay
+# ---------------------------------------------------------------------------
+
+HELP_ENTRIES = [
+    ("Navigation", [
+        ("↑ / ↓",        "Select server"),
+        ("PgUp / PgDn",  "Scroll skill list"),
+    ]),
+    ("Server Control", [
+        ("Space / Enter", "Start or stop selected server"),
+        ("A",             "Start all servers"),
+        ("X",             "Stop all servers"),
+        ("R",             "Restart selected server"),
+    ]),
+    ("Config", [
+        ("T",             "Cycle transport  (SSE → Streamable → ...)"),
+    ]),
+    ("Other", [
+        ("L",             "View logs for selected server"),
+        ("?",             "Show this help"),
+        ("Q",             "Quit dashboard"),
+    ]),
+]
+
+def show_help(win):
+    h, w = win.getmaxyx()
+
+    # Each section: 1 blank + 1 header + 1 underline + entries + 1 trailing blank
+    box_h = sum(4 + len(entries) for _, entries in HELP_ENTRIES) + 3
+    # Wide enough for the longest line: 2 indent + 16 key + 2 gap + desc + 2 border
+    max_desc  = max(len(desc) for _, entries in HELP_ENTRIES for _, desc in entries)
+    box_w     = min(w - 4, max(50, 2 + 16 + 2 + max_desc + 2))
+    key_col   = 4
+    desc_col  = key_col + 16 + 1   # 4 indent + 16 key + 1 gap
+    desc_max  = box_w - desc_col - 2  # leave room for right border
+
+    by = max(1, (h - box_h) // 2)
+    bx = max(1, (w - box_w) // 2)
+
+    # Draw shadow
+    for r in range(box_h):
+        addstr_clipped(win, by + r + 1, bx + 2, " " * box_w, curses.color_pair(C_BORDER))
+
+    # Draw box
+    panel = curses.newwin(box_h, box_w, by, bx)
+    panel.bkgd(" ", curses.color_pair(C_BORDER))
+    panel.border()
+
+    title = "  Keybindings  (any key to close)  "
+    addstr_clipped(panel, 0, max(1, (box_w - len(title)) // 2), title,
+                   curses.color_pair(C_TITLE) | curses.A_BOLD)
+
+    row = 1
+    for section, entries in HELP_ENTRIES:
+        row += 1  # blank line before section
+        addstr_clipped(panel, row, 2, section, curses.color_pair(C_KEY) | curses.A_BOLD)
+        row += 1  # underline below section header
+        addstr_clipped(panel, row, 2, "─" * (box_w - 4), curses.color_pair(C_BORDER))
+        for key, desc in entries:
+            row += 1
+            addstr_clipped(panel, row, key_col,  f"{key:<16}", curses.color_pair(C_STAT) | curses.A_BOLD)
+            addstr_clipped(panel, row, desc_col, desc,         curses.color_pair(C_DIM), desc_max)
+        row += 1  # blank line after section
+
+    panel.refresh()
+    panel.getch()
+    win.touchwin()
+    win.refresh()
 
 # ---------------------------------------------------------------------------
 # Log viewer
@@ -685,6 +753,13 @@ def main(stdscr):
         elif key == curses.KEY_PPAGE:   # Page Up → scroll skills
             skill_scroll = max(0, skill_scroll - 10)
 
+        elif key in (ord("t"), ord("T")):
+            global CURRENT_TRANSPORT
+            CURRENT_TRANSPORT = TRANSPORTS[(TRANSPORTS.index(CURRENT_TRANSPORT) + 1) % len(TRANSPORTS)]
+            ep = TRANSPORT_PATHS[CURRENT_TRANSPORT]
+            message = f"Transport → {CURRENT_TRANSPORT.upper()}  (new servers will use {ep})"
+            msg_ttl = 6
+
         elif key in (ord(" "), ord("\n"), curses.KEY_ENTER):
             srv = SERVERS[selected]
             if is_running(srv["name"]):
@@ -692,7 +767,8 @@ def main(stdscr):
                 message = f"Stopped {srv['name']}"
             else:
                 ok = start_server(srv["name"], srv["port"])
-                message = (f"Started {srv['name']} → :{ srv['port']}/sse"
+                ep = TRANSPORT_PATHS[CURRENT_TRANSPORT]
+                message = (f"Started {srv['name']} → :{srv['port']}{ep} [{CURRENT_TRANSPORT}]"
                            if ok else f"Failed to start {srv['name']} — check logs (L)")
             msg_ttl = 8
 
@@ -706,8 +782,21 @@ def main(stdscr):
             message = "Stopped all servers"
             msg_ttl = 8
 
+        elif key in (ord("r"), ord("R")):
+            srv = SERVERS[selected]
+            stop_server(srv["name"])
+            ok = start_server(srv["name"], srv["port"])
+            ep = TRANSPORT_PATHS[CURRENT_TRANSPORT]
+            message = (f"Restarted {srv['name']} → :{srv['port']}{ep} [{CURRENT_TRANSPORT}]"
+                       if ok else f"Failed to restart {srv['name']} — check logs (L)")
+            msg_ttl = 8
+
         elif key in (ord("l"), ord("L")):
             show_logs(stdscr, SERVERS[selected]["name"])
+            stdscr.timeout(500)
+
+        elif key == ord("?"):
+            show_help(stdscr)
             stdscr.timeout(500)
 
         elif key == curses.KEY_RESIZE:

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # CTF-MCP Server Manager
 # Usage:
-#   ./manage.sh start [category|all]   # start one or all servers
-#   ./manage.sh stop  [category|all]   # stop one or all servers
-#   ./manage.sh restart [category|all] # restart one or all servers
-#   ./manage.sh status                 # show running servers
+#   ./manage.sh start [category|all] [--transport sse|streamable]
+#   ./manage.sh stop  [category|all]
+#   ./manage.sh restart [category|all] [--transport sse|streamable]
+#   ./manage.sh status
+#   ./manage.sh logs <category>
 
 set -euo pipefail
 
@@ -24,6 +25,33 @@ PID_DIR="$SCRIPT_DIR/.pids"
 LOG_DIR="$SCRIPT_DIR/.logs"
 
 mkdir -p "$PID_DIR" "$LOG_DIR"
+
+# Parse --transport flag from remaining args (can appear anywhere)
+TRANSPORT="sse"
+FILTERED_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --transport)
+            TRANSPORT="$2"
+            shift 2
+            ;;
+        *)
+            FILTERED_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"
+
+if [[ "$TRANSPORT" != "sse" && "$TRANSPORT" != "streamable" ]]; then
+    echo "Invalid transport '$TRANSPORT'. Choose: sse, streamable"
+    exit 1
+fi
+
+# Endpoint path differs by transport
+endpoint_path() {
+    [[ "$TRANSPORT" == "streamable" ]] && echo "/mcp" || echo "/sse"
+}
 
 # Category → port mapping
 declare -A PORTS=(
@@ -53,13 +81,14 @@ is_running() {
 start_one() {
     local category="$1"
     local port="${PORTS[$category]}"
+    local ep; ep=$(endpoint_path)
 
     if is_running "$category"; then
-        echo "  [already running] $category → http://localhost:$port/sse (pid $(cat "$(pid_file "$category")"))"
+        echo "  [already running] $category → http://localhost:$port$ep (pid $(cat "$(pid_file "$category")"))"
         return
     fi
 
-    nohup "$VENV_PYTHON" "$SCRIPT_DIR/sse_server.py" "$category" "$port" \
+    nohup "$VENV_PYTHON" "$SCRIPT_DIR/sse_server.py" "$category" "$port" --transport "$TRANSPORT" \
         > "$(log_file "$category")" 2>&1 &
 
     local pid=$!
@@ -67,7 +96,7 @@ start_one() {
     sleep 0.4
 
     if is_running "$category"; then
-        echo "  [started] $category → http://localhost:$port/sse (pid $pid)"
+        echo "  [started] $category → http://localhost:$port$ep (pid $pid) [$TRANSPORT]"
     else
         echo "  [FAILED]  $category — check $(log_file "$category")"
         rm -f "$(pid_file "$category")"
@@ -90,13 +119,14 @@ stop_one() {
 }
 
 status_all() {
-    echo "CTF-MCP Server Status"
+    local ep; ep=$(endpoint_path)
+    echo "CTF-MCP Server Status  [transport: $TRANSPORT]"
     echo "---------------------"
     for cat in "${ALL_CATEGORIES[@]}"; do
         local port="${PORTS[$cat]}"
         if is_running "$cat"; then
             local pid; pid=$(cat "$(pid_file "$cat")")
-            echo "  RUNNING  $cat → http://localhost:$port/sse  (pid $pid)"
+            echo "  RUNNING  $cat → http://localhost:$port$ep  (pid $pid)"
         else
             echo "  STOPPED  $cat → port $port"
         fi
@@ -156,10 +186,12 @@ case "$CMD" in
         ;;
 
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs} [category|all]"
+        echo "Usage: $0 {start|stop|restart|status|logs} [category|all] [--transport sse|streamable]"
         echo ""
-        echo "Categories: ${ALL_CATEGORIES[*]}"
-        echo "Ports:      full=8000 crypto=8001 web=8002 pwn=8003 reverse=8004 forensics=8005"
+        echo "Categories:  ${ALL_CATEGORIES[*]}"
+        echo "Ports:       full=8000 crypto=8001 web=8002 pwn=8003 reverse=8004 forensics=8005"
+        echo "Transports:  sse (default, GET /sse + POST /messages)"
+        echo "             streamable (POST /mcp — current MCP spec)"
         exit 1
         ;;
 esac
