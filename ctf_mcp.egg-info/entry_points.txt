@@ -1,0 +1,7 @@
+[console_scripts]
+ctf-crypto-mcp = ctf_mcp.servers.crypto:main
+ctf-forensics-mcp = ctf_mcp.servers.forensics:main
+ctf-mcp = ctf_mcp.server:main
+ctf-pwn-mcp = ctf_mcp.servers.pwn:main
+ctf-reverse-mcp = ctf_mcp.servers.reverse:main
+ctf-web-mcp = ctf_mcp.servers.web:main
