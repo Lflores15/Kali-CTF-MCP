@@ -24,6 +24,7 @@ from .tools.reverse import ReverseTools
 from .tools.forensics import ForensicsTools
 from .tools.misc import MiscTools
 from .tools.hashcat import CrackingTools
+from .tools.network import NetworkTools
 from .core.orchestrator import CTFOrchestrator, Challenge, SolveResult
 
 # Configure logging
@@ -44,6 +45,7 @@ reverse_tools = ReverseTools()
 forensics_tools = ForensicsTools()
 misc_tools = MiscTools()
 cracking_tools = CrackingTools()
+network_tools = NetworkTools()
 
 # Module registry
 MODULES = [
@@ -54,6 +56,7 @@ MODULES = [
     ("forensics", forensics_tools),
     ("misc", misc_tools),
     ("cracking", cracking_tools),
+    ("network", network_tools),
 ]
 
 # Tool registry - maps tool names to their handlers
