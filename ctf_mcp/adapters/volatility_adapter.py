@@ -5,12 +5,52 @@ Interface for the vol (volatility3) memory forensics framework
 
 import json
 import re
+import shutil
 import tempfile
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 from .base import ToolAdapter, AdapterResult
 from ..utils.security import InputValidator, SecurityError
+
+
+def _find_vol_binary() -> str:
+    """
+    Locate the vol binary.
+
+    Search order:
+    1. System PATH
+    2. Project-local Kali venv (Kali/bin/vol next to the package root)
+    3. ~/venv/bin/vol  (common manual install location)
+    4. Common virtualenv names relative to home
+    """
+    # 1. System PATH
+    if shutil.which("vol"):
+        return "vol"
+
+    # 2. Project-local venv: walk up from this file to find Kali/bin/vol
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        for venv_name in ("Kali", "venv", ".venv", "env"):
+            candidate = parent / venv_name / "bin" / "vol"
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+
+    # 3. Known project venv location
+    project_venv = Path.home() / "Documents" / "Code" / "Kali-venv" / "Kali-venv" / "bin" / "vol"
+    if project_venv.is_file() and os.access(project_venv, os.X_OK):
+        return str(project_venv)
+
+    # 4. Common home-directory venv locations
+    home = Path.home()
+    for venv_name in ("venv", ".venv", "env", "Kali", "kali-venv"):
+        candidate = home / venv_name / "bin" / "vol"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    # Not found — return bare name so error messages are clear
+    return "vol"
 
 
 class VolatilityAdapter(ToolAdapter):
@@ -21,13 +61,17 @@ class VolatilityAdapter(ToolAdapter):
     Supports Windows, Linux, and Mac memory images.
     """
 
+    def __init__(self):
+        super().__init__()
+        self._vol_binary = _find_vol_binary()
+
     @property
     def name(self) -> str:
         return "volatility"
 
     @property
     def tool_name(self) -> str:
-        return "vol"
+        return self._vol_binary
 
     @property
     def description(self) -> str:
