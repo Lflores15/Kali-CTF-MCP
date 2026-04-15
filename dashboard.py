@@ -152,6 +152,26 @@ SERVERS = [
     {"name": "forensics", "port": 8005, "tools": len(TOOL_NAMES["forensics"]), "desc": "Forensics + Mem + PCAP"},
 ]
 
+# What each server can solve
+CAPABILITIES: dict[str, list[str]] = {
+    "crypto":    ["Classical ciphers", "RSA attacks", "XOR / stream ciphers",
+                  "Hash cracking", "Encoding / decoding", "AES / DES / RC4",
+                  "Frequency analysis", "Number theory"],
+    "web":       ["SQL injection", "XSS / CSRF", "JWT attacks", "SSRF / XXE",
+                  "SSTI", "LFI / RFI", "Deserialization", "GraphQL injection",
+                  "HTTP smuggling", "OAuth / SAML", "File upload bypass"],
+    "pwn":       ["Buffer overflows", "ROP chains", "ret2libc / ret2csu",
+                  "Shellcode gen", "Format strings", "Heap exploitation",
+                  "GOT / PLT", "Sigreturn (SROP)", "One gadget"],
+    "reverse":   ["ELF / PE analysis", "Disassembly", "Symbol extraction",
+                  "Checksec", "ROP gadget search", "String extraction",
+                  "Deobfuscation"],
+    "forensics": ["Steganography", "PCAP analysis", "Memory forensics",
+                  "File carving", "Entropy analysis", "EXIF / metadata",
+                  "Password cracking", "Zip / archive analysis"],
+    "full":      ["All categories combined", "Auto-solve orchestration"],
+}
+
 # External tool dependencies per server category
 EXTERNAL_TOOLS: dict[str, list[tuple[str, str]]] = {
     "crypto":    [],  # pure Python
@@ -483,31 +503,49 @@ def draw_servers(win, x: int, y: int, panel_w: int, panel_h: int, selected: int)
 
 def draw_tools(win, x: int, y: int, panel_w: int, panel_h: int,
                selected: int, tool_scroll: int):
-    """Draw external tool dependencies for the selected server."""
+    """Draw capabilities and external tool dependencies for the selected server."""
     border_attr = curses.color_pair(C_BORDER)
     srv         = SERVERS[selected]
     name        = srv["name"]
+    caps        = CAPABILITIES.get(name, [])
     ext_tools   = check_external_tools(name)
 
-    # Section divider + header
-    draw_hline(win, y, x, x + panel_w, border_attr)
-    addstr_clipped(win, y + 1, x + 1, " EXTERNAL TOOLS",
-                   curses.color_pair(C_LABEL) | curses.A_BOLD)
-    draw_hline(win, y + 2, x, x + panel_w, border_attr)
+    row = y
 
-    if panel_h < 4:
+    # ── Capabilities section ─────────────────────────────────────────────
+    draw_hline(win, row, x, x + panel_w, border_attr)
+    row += 1
+    addstr_clipped(win, row, x + 1, " SOLVES", curses.color_pair(C_LABEL) | curses.A_BOLD)
+    row += 1
+    draw_hline(win, row, x, x + panel_w, border_attr)
+    row += 1
+
+    for cap in caps:
+        if row >= y + panel_h - 1:
+            break
+        addstr_clipped(win, row, x + 2, "·", curses.color_pair(C_KEY) | curses.A_BOLD)
+        addstr_clipped(win, row, x + 4, cap, curses.color_pair(C_STAT), panel_w - 6)
+        row += 1
+
+    # ── External tools section ───────────────────────────────────────────
+    if row >= y + panel_h - 2:
         return
+
+    row += 1  # blank separator
+    draw_hline(win, row, x, x + panel_w, border_attr)
+    row += 1
+    addstr_clipped(win, row, x + 1, " EXTERNAL TOOLS", curses.color_pair(C_LABEL) | curses.A_BOLD)
+    row += 1
+    draw_hline(win, row, x, x + panel_w, border_attr)
+    row += 1
 
     if not ext_tools:
-        addstr_clipped(win, y + 3, x + 2, "No external tools required",
-                       curses.color_pair(C_DIM))
+        if row < y + panel_h:
+            addstr_clipped(win, row, x + 2, "No external tools required",
+                           curses.color_pair(C_DIM))
         return
 
-    visible = panel_h - 4
-    display = ext_tools[tool_scroll: tool_scroll + visible]
-
-    for i, (tool_name, installed) in enumerate(display):
-        row = y + 3 + i
+    for tool_name, installed in ext_tools:
         if row >= y + panel_h:
             break
         badge      = "✔ " if installed else "✘ "
@@ -519,13 +557,7 @@ def draw_tools(win, x: int, y: int, panel_w: int, panel_h: int,
         addstr_clipped(win, row, x + 2,  badge,      badge_attr)
         addstr_clipped(win, row, x + 4,  f"{tool_name:<14}", name_attr)
         addstr_clipped(win, row, x + 18, status_lbl, curses.color_pair(C_DIM))
-
-    # Scroll indicator if needed
-    if len(ext_tools) > visible:
-        pct = int(tool_scroll / max(1, len(ext_tools) - visible) * 100)
-        addstr_clipped(win, y + panel_h - 1, x + 1,
-                       f" ↕ {tool_scroll+1}-{min(tool_scroll+visible, len(ext_tools))}/{len(ext_tools)} ({pct}%)",
-                       curses.color_pair(C_DIM))
+        row += 1
 
 # ---------------------------------------------------------------------------
 # Panel: Skills
@@ -543,11 +575,11 @@ def draw_skills(win, x: int, y: int, panel_w: int, panel_h: int,
     status_str = "LIVE" if running else "offline"
     status_attr = curses.color_pair(C_RUNNING) | curses.A_BOLD if running else curses.color_pair(C_STOPPED)
     header = f" SKILLS — {name} ["
-    addstr_clipped(win, y, x + 1, header, curses.color_pair(C_LABEL) | curses.A_BOLD)
+    addstr_clipped(win, y, x + 1, header, curses.color_pair(C_LABEL) | curses.A_BOLD, panel_w - 2)
     cx = x + 1 + len(header)
-    addstr_clipped(win, y, cx, status_str, status_attr)
+    addstr_clipped(win, y, cx, status_str, status_attr, x + panel_w - cx - 1)
     cx += len(status_str)
-    addstr_clipped(win, y, cx, f"] {len(tools)} tools", curses.color_pair(C_LABEL) | curses.A_BOLD)
+    addstr_clipped(win, y, cx, f"] {len(tools)} tools", curses.color_pair(C_LABEL) | curses.A_BOLD, x + panel_w - cx - 1)
 
     draw_hline(win, y + 1, x, x + panel_w, border_attr)
 
@@ -736,15 +768,17 @@ def show_logs(win, name: str):
         display = lines[-visible:] if len(lines) > visible else lines
         for i, line in enumerate(display):
             addstr_clipped(win, i + 2, 2, line, 0, w - 4)
+    win.nodelay(False)  # block until a key is pressed
     win.refresh()
     win.getch()
+    win.nodelay(True)   # restore non-blocking for the main loop
 
 # ---------------------------------------------------------------------------
 # Main draw
 # ---------------------------------------------------------------------------
 
 def draw(win, selected: int, message: str, tick: int,
-         skill_scroll: int, tool_scroll: int, claude_info: dict):
+         skill_scroll: int, tool_scroll: int):
     h, w = win.getmaxyx()
     win.erase()
     win.attron(curses.color_pair(C_BORDER))
@@ -761,11 +795,10 @@ def draw(win, selected: int, message: str, tick: int,
     # Server table height: header(1) + underline(1) + rows(6) + 1 padding = 9
     srv_table_h = 9
 
-    # ── Layout: 3 panels when wide, 1 panel when narrow ──────────────────
-    if w >= 120:
-        srv_w    = 56
-        claude_w = 28
-        skill_w  = w - srv_w - claude_w - 2
+    # ── Layout: 2 panels when wide, 1 panel when narrow ─────────────────
+    if w >= 80:
+        skill_w = min(42, w - 60)   # skills panel: up to 42 cols, at least leaves 60 for left
+        srv_w   = w - skill_w - 2   # left panel takes the rest (- outer borders)
 
         # Left panel: server table (top) + tools panel (bottom)
         draw_vline(win, srv_w, content_y, content_y + content_h, curses.color_pair(C_BORDER))
@@ -773,27 +806,8 @@ def draw(win, selected: int, message: str, tick: int,
         tools_h = content_h - srv_table_h
         draw_tools(win, 1, content_y + srv_table_h, srv_w, tools_h, selected, tool_scroll)
 
-        # Middle: skills panel
-        draw_vline(win, srv_w + skill_w, content_y, content_y + content_h, curses.color_pair(C_BORDER))
+        # Right: skills panel — content clipped to skill_w
         draw_skills(win, srv_w, content_y, skill_w, content_h, selected, skill_scroll)
-
-        # Right: Claude info
-        draw_claude(win, srv_w + skill_w, content_y, claude_w, content_h, claude_info)
-
-    elif w >= 80:
-        srv_w   = w // 2
-        right_w = w - srv_w - 1
-        half_h  = content_h // 2
-
-        draw_vline(win, srv_w, content_y, content_y + content_h, curses.color_pair(C_BORDER))
-        # Left: server table + tools
-        draw_servers(win, 1, content_y, srv_w, srv_table_h, selected)
-        tools_h = content_h - srv_table_h
-        draw_tools(win, 1, content_y + srv_table_h, srv_w, tools_h, selected, tool_scroll)
-        # Right: skills top, Claude bottom
-        draw_skills(win, srv_w, content_y, right_w, half_h, selected, skill_scroll)
-        draw_hline(win, content_y + half_h, srv_w, w - 1, curses.color_pair(C_BORDER))
-        draw_claude(win, srv_w, content_y + half_h, right_w, content_h - half_h, claude_info)
 
     else:
         draw_servers(win, 1, content_y, w - 2, srv_table_h, selected)
@@ -819,19 +833,12 @@ def main(stdscr):
     tick         = 0
     skill_scroll = 0
     tool_scroll  = 0
-    claude_info  = load_claude_info()
-    info_refresh = 0   # refresh claude info every 30 ticks (~15s)
 
     while True:
-        if info_refresh <= 0:
-            claude_info  = load_claude_info()
-            info_refresh = 30
-
-        draw(stdscr, selected, message if msg_ttl > 0 else "", tick, skill_scroll, tool_scroll, claude_info)
+        draw(stdscr, selected, message if msg_ttl > 0 else "", tick, skill_scroll, tool_scroll)
 
         key = stdscr.getch()
-        tick        += 1
-        info_refresh -= 1
+        tick += 1
         if msg_ttl > 0:
             msg_ttl -= 1
 

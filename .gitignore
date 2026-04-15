@@ -17,6 +17,11 @@ build/
 .agents/
 skills-lock.json
 
+# Gemini
+.gemini
+
 # Server manager runtime files
 .pids/
 .logs/
+
+
